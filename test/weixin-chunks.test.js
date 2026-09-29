@@ -10,6 +10,8 @@ const {
   chunkReplyTextForWeixin,
   mergeShortChunks,
   packChunksForWeixinDelivery,
+  partitionChunksForWeixinDelivery,
+  partitionHardChunksForWeixinDelivery,
   splitTextAtBoundaries,
   findLastPreferredBoundary,
   collectStreamingBoundaries,
@@ -140,6 +142,21 @@ test("packChunksForWeixinDelivery groups tail when over limit", () => {
   assert.equal(packed.length, 10);
   assert.equal(packed[0], "1");
   assert.ok(packed[9].includes("11") || packed[9].includes("12"));
+});
+
+test("partitionChunksForWeixinDelivery preserves overflow after the tenth message", () => {
+  const chunks = Array.from({ length: 12 }, (_, i) => `${i + 1}:` + "x".repeat(3798));
+  const partitioned = partitionChunksForWeixinDelivery(chunks, 10, 3800);
+  assert.equal(partitioned.sendChunks.length, 10);
+  assert.ok(partitioned.overflowText.length > 0);
+  assert.equal(partitioned.sendChunks.join("") + partitioned.overflowText, chunks.join(""));
+});
+
+test("partitionHardChunksForWeixinDelivery preserves block overflow", () => {
+  const chunks = Array.from({ length: 12 }, (_, i) => `block-${i}`);
+  const partitioned = partitionHardChunksForWeixinDelivery(chunks, 10);
+  assert.deepEqual(partitioned.sendChunks, chunks.slice(0, 10));
+  assert.equal(partitioned.overflowText, chunks.slice(10).join(""));
 });
 
 test("splitUtf8 hard-truncates oversized text", () => {

@@ -38,6 +38,7 @@ async function runSystemCheckinPoller(config) {
       senderId: target.senderId,
       workspaceRoot: target.workspaceRoot,
       text: buildCheckinTrigger(config),
+      deliveryMode: "last_active",
       createdAt: new Date().toISOString(),
     });
     console.log(`[cyberboss] checkin queued id=${queued.id}`);
@@ -107,7 +108,10 @@ function formatRangeMinutes(range) {
 
 function buildCheckinTrigger(config) {
   const userName = normalizeText(config?.userName) || "the user";
-  return INTERNAL_CHECKIN_TRIGGER_TEMPLATE.replace("%USER%", userName);
+  return [
+    INTERNAL_CHECKIN_TRIGGER_TEMPLATE.replace("%USER%", userName),
+    "If the thread_bridge_checkin tool is available, call it before deciding whether to send a message. Read any available bridge summary only if you genuinely want that context.",
+  ].join("\n");
 }
 
 module.exports = { runSystemCheckinPoller };

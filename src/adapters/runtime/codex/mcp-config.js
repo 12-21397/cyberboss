@@ -44,6 +44,39 @@ function buildCodexMcpConfigArgs(mcpServerConfig) {
   return configArgs;
 }
 
+const OMBRE_BRAIN_TOOL_NAMES = [
+  "breath", "breath_search", "breath_advanced", "hold", "grow", "trace", "dream",
+  "pulse", "plan", "anchor", "release", "letter_write", "letter_read", "I",
+];
+
+function buildCodexHttpMcpConfigArgs({ name, url, bearerTokenEnvVar = "" } = {}) {
+  const normalizedName = normalizeNonEmptyString(name);
+  const normalizedUrl = normalizeNonEmptyString(url);
+  const normalizedBearerTokenEnvVar = normalizeNonEmptyString(bearerTokenEnvVar);
+  if (!normalizedName || !normalizedUrl) {
+    return [];
+  }
+  const configArgs = [
+    "-c",
+    `mcp_servers.${normalizedName}.url=${quoteTomlString(normalizedUrl)}`,
+  ];
+  if (normalizedBearerTokenEnvVar) {
+    configArgs.push(
+      "-c",
+      `mcp_servers.${normalizedName}.bearer_token_env_var=${quoteTomlString(normalizedBearerTokenEnvVar)}`,
+    );
+  }
+  if (normalizedName === "ombre_brain") {
+    for (const toolName of OMBRE_BRAIN_TOOL_NAMES) {
+      configArgs.push(
+        "-c",
+        `mcp_servers.${normalizedName}.tools.${toolName}.approval_mode=${quoteTomlString("auto")}`,
+      );
+    }
+  }
+  return configArgs;
+}
+
 function quoteTomlString(value) {
   return JSON.stringify(String(value ?? ""));
 }
@@ -57,6 +90,7 @@ function normalizeNonEmptyString(value) {
 }
 
 module.exports = {
+  buildCodexHttpMcpConfigArgs,
   buildCodexMcpConfigArgs,
   resolveCodexProjectToolMcpServerConfig,
 };

@@ -5,7 +5,11 @@ const { ClaudeCodeProcessClient } = require("./process-client");
 const { mapClaudeCodeMessageToRuntimeEvent } = require("./events");
 const { ensureClaudeProjectMcpConfig } = require("./project-settings");
 const { SessionStore } = require("../codex/session-store");
-const { buildOpeningTurnText, buildInstructionRefreshText } = require("../shared-instructions");
+const {
+  buildOpeningTurnText,
+  buildInstructionRefreshText,
+  buildContinuityTurnText,
+} = require("../shared-instructions");
 const { ClaudeCodeIpcServer } = require("./ipc-server");
 const CLAUDE_RESUME_SESSION_TIMEOUT_MS = 8000;
 
@@ -286,7 +290,9 @@ function createClaudeCodeRuntimeAdapter(config) {
         attached = await attachClientToThread(workspaceRoot, "", desiredModel);
       }
       const { client, threadId: activeThreadId } = attached;
-      const outboundText = openingTurn ? buildOpeningTurnText(config, text) : text;
+      const outboundText = openingTurn
+        ? buildOpeningTurnText(config, text)
+        : buildContinuityTurnText(config, text, { cacheKey: activeThreadId || threadId });
       const outboundThreadId = activeThreadId || threadId;
       if (outboundThreadId) {
         sessionStore.setThreadIdForWorkspace(

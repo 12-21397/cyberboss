@@ -1,4 +1,5 @@
 const { spawn } = require("child_process");
+const path = require("path");
 
 class ClaudeCodeProcessClient {
   constructor({ command = "claude", cwd, env, model = "", permissionMode = "default", disableVerbose = false, extraArgs = [], mcpConfigPaths = [], ipcServer = null, workspaceRoot = "" }) {
@@ -63,11 +64,13 @@ class ClaudeCodeProcessClient {
     console.log(
       `[claudecode-runtime] launching command=${this.command} cwd=${this.cwd} mcp_config=${mcpLabel}`
     );
-    const child = spawn(this.command, args, {
+    const spawnSpec = resolveSpawnSpec(this.command, args);
+    const child = spawn(spawnSpec.command, spawnSpec.args, {
       cwd: this.cwd,
       env: this.env,
       stdio: ["pipe", "pipe", "pipe"],
       shell: false,
+      windowsHide: true,
     });
     this.child = child;
     this.stdin = child.stdin;
@@ -390,6 +393,26 @@ class ClaudeCodeProcessClient {
     }
     this.sessionWaiters.clear();
   }
+}
+
+function resolveSpawnSpec(command, args) {
+  if (process.platform !== "win32") {
+    return { command, args };
+  }
+  const extension = path.extname(String(command || "")).toLowerCase();
+  if (extension === ".cmd" || extension === ".bat") {
+    return {
+      command: "cmd.exe",
+      args: ["/d", "/c", command, ...args],
+    };
+  }
+  if (extension === ".js" || extension === ".cjs" || extension === ".mjs") {
+    return {
+      command: process.execPath,
+      args: [command, ...args],
+    };
+  }
+  return { command, args };
 }
 
 function buildArgs({ model, permissionMode, disableVerbose, extraArgs, mcpConfigPaths, resumeSessionId }) {

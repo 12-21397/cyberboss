@@ -17,16 +17,18 @@ const {
 function createConfig(overrides = {}) {
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "cyberboss-sticker-test-"));
   const stickersDir = path.join(stateDir, "stickers");
+  const repoRoot = path.resolve(__dirname, "..");
+  const templateDir = path.join(repoRoot, "templates", "stickers");
   return {
     stateDir,
     stickersDir,
     stickerAssetsDir: path.join(stickersDir, "assets"),
     stickersIndexFile: path.join(stickersDir, "index.json"),
     stickerTagsFile: path.join(stickersDir, "tags.json"),
-    stickersTemplateDir: path.join("/Users/tingyiwen/Dev/cyberboss", "templates", "stickers"),
-    stickersTemplateIndexFile: path.join("/Users/tingyiwen/Dev/cyberboss", "templates", "stickers", "index.json"),
-    stickerTagsTemplateFile: path.join("/Users/tingyiwen/Dev/cyberboss", "templates", "stickers", "tags.json"),
-    stickerNormalizeGifScript: path.join("/Users/tingyiwen/Dev/cyberboss", "scripts", "normalize-sticker-gif.js"),
+    stickersTemplateDir: templateDir,
+    stickersTemplateIndexFile: path.join(templateDir, "index.json"),
+    stickerTagsTemplateFile: path.join(templateDir, "tags.json"),
+    stickerNormalizeGifScript: path.join(repoRoot, "scripts", "normalize-sticker-gif.js"),
     accountsDir: path.join(stateDir, "accounts"),
     weixinBaseUrl: "https://ilinkai.weixin.qq.com",
     workspaceId: "default",
@@ -157,7 +159,7 @@ test("sticker service saves inbox images as GIF stickers, grows tags, dedupes, a
 
   assert.equal(first.createdCount, 1);
   assert.equal(firstItem.created, true);
-  assert.equal(path.extname(firstItem.filePath), ".gif");
+  assert.equal(path.extname(firstItem.filePath), process.platform === "darwin" ? ".gif" : ".png");
   assert.ok(fs.existsSync(firstItem.filePath));
   assert.equal(loadStickerIndexSync(config)[firstItem.stickerId].desc, "小猫贴脸蹭蹭，撒娇示爱");
   assert.equal(loadStickerIndexSync(config)[firstItem.stickerId].tags.includes("夸夸"), true);

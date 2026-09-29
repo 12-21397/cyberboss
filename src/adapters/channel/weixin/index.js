@@ -71,13 +71,17 @@ function createWeixinChannelAdapter(config) {
     }
     const normalizedContent = normalizeWeixinReplyText(content);
     const textChunks = preserveBlock ? null : chunkReplyTextForWeixin(normalizedContent, minWeixinChunk);
-    const sendChunks = preserveBlock
-      ? splitUtf8(normalizedContent || "Completed.", MAX_WEIXIN_CHUNK)
-      : packChunksForWeixinDelivery(
+    const delivery = preserveBlock
+      ? partitionHardChunksForWeixinDelivery(
+        splitUtf8(normalizedContent || "Completed.", MAX_WEIXIN_CHUNK),
+        WEIXIN_MAX_DELIVERY_MESSAGES
+      )
+      : partitionChunksForWeixinDelivery(
         textChunks?.length ? textChunks : ["Completed."],
         WEIXIN_MAX_DELIVERY_MESSAGES,
         MAX_WEIXIN_CHUNK
       );
+    const sendChunks = delivery.sendChunks;
     return sendChunks.reduce((promise, chunk, index) => promise
       .then(() => {
         const deliveryChunk = finalizeWeixinDeliveryChunk(chunk) || "Completed.";
@@ -95,7 +99,10 @@ function createWeixinChannelAdapter(config) {
           return sleep(SEND_MESSAGE_CHUNK_INTERVAL_MS);
         }
         return null;
-      }), Promise.resolve());
+      }), Promise.resolve()).then(() => ({
+        sentMessageCount: sendChunks.length,
+        overflowText: delivery.overflowText,
+      }));
   }
 
   return {
@@ -168,7 +175,7 @@ function createWeixinChannelAdapter(config) {
       return inboundFilter.normalize(message, config, account.accountId);
     },
     async sendText({ userId, text, contextToken = "", preserveBlock = false }) {
-      await sendTextChunks({ userId, text, contextToken, preserveBlock });
+      return sendTextChunks({ userId, text, contextToken, preserveBlock });
     },
     async sendTyping({ userId, status = 1, contextToken = "" }) {
       const account = ensureAccount();
@@ -370,6 +377,30 @@ function packChunksForWeixinDelivery(chunks, maxMessages = 10, maxChunkChars = 3
   return preserved.concat(groupedTail.map((item) => normalizeLineEndings(item) || "Completed.")).slice(0, maxMessages);
 }
 
+function partitionChunksForWeixinDelivery(chunks, maxMessages = 10, maxChunkChars = 3800) {
+  const normalizedChunks = Array.isArray(chunks)
+    ? chunks.map((chunk) => normalizeLineEndings(chunk)).filter((chunk) => chunk.trim())
+    : [];
+  const sendChunks = packChunksForWeixinDelivery(normalizedChunks, maxMessages, maxChunkChars);
+  const fullText = normalizedChunks.join("");
+  const sentText = sendChunks.join("");
+  return {
+    sendChunks,
+    overflowText: fullText.startsWith(sentText) ? fullText.slice(sentText.length) : "",
+  };
+}
+
+function partitionHardChunksForWeixinDelivery(chunks, maxMessages = 10) {
+  const normalizedChunks = Array.isArray(chunks)
+    ? chunks.map((chunk) => normalizeLineEndings(chunk)).filter((chunk) => chunk.trim())
+    : [];
+  const limit = Math.max(0, Number.parseInt(maxMessages, 10) || 0);
+  return {
+    sendChunks: normalizedChunks.slice(0, limit),
+    overflowText: normalizedChunks.slice(limit).join(""),
+  };
+}
+
 function splitTextAtBoundaries(text, boundaries) {
   const units = [];
   let start = 0;
@@ -489,6 +520,8 @@ module.exports = {
   chunkReplyTextForWeixin,
   mergeShortChunks,
   packChunksForWeixinDelivery,
+  partitionChunksForWeixinDelivery,
+  partitionHardChunksForWeixinDelivery,
   splitTextAtBoundaries,
   findLastPreferredBoundary,
   collectStreamingBoundaries,

@@ -1,5 +1,9 @@
 const { CodexRpcClient } = require("./rpc-client");
-const { buildOpeningTurnText, buildInstructionRefreshText } = require("../shared-instructions");
+const {
+  buildOpeningTurnText,
+  buildInstructionRefreshText,
+  buildContinuityTurnText,
+} = require("../shared-instructions");
 const { mapCodexMessageToRuntimeEvent } = require("./events");
 const {
   extractAssistantText,
@@ -199,7 +203,7 @@ function createCodexRuntimeAdapter(config) {
         model: desiredModel,
         modelProvider: desiredModelProvider,
       });
-      let outboundText = text;
+      let outboundText = buildContinuityTurnText(config, text, { cacheKey: threadId });
       if (!threadId) {
         const response = await runtimeClient.startThread({
           cwd: workspaceRoot,

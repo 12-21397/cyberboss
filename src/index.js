@@ -18,7 +18,9 @@ function ensureDefaultStateDirectory() {
 
 function loadEnv() {
   ensureDefaultStateDirectory();
+  const projectRoot = path.resolve(__dirname, "..");
   const candidates = [
+    path.join(projectRoot, ".env"),
     path.join(process.cwd(), ".env"),
     path.join(os.homedir(), ".cyberboss", ".env"),
   ];
@@ -27,9 +29,11 @@ function loadEnv() {
       continue;
     }
     dotenv.config({ path: envPath });
-    return;
+    break;
   }
-  dotenv.config();
+  dotenv.config({ path: path.join(projectRoot, ".env.telegram") });
+  dotenv.config({ path: path.join(projectRoot, ".env.qqbot") });
+  dotenv.config({ path: path.join(projectRoot, ".env.elevenlabs") });
 }
 
 function ensureRuntimeEnv() {

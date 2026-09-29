@@ -9,6 +9,7 @@ const { promisify } = require("util");
 const { resolveSelectedAccount } = require("../adapters/channel/weixin/account-store");
 const { loadPersistedContextTokens } = require("../adapters/channel/weixin/context-token-store");
 const { resolvePreferredSenderId } = require("../core/default-targets");
+const { resolveCurrentChatContextToken } = require("./channel-file-service");
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_PICK_LIMIT = 5;
@@ -16,6 +17,7 @@ const MAX_PICK_LIMIT = 20;
 const MAX_STICKER_SAVE_BATCH_SIZE = 10;
 const MAX_STICKER_MUTATION_BATCH_SIZE = 50;
 const MIN_STICKER_DESC_CHARS = 16;
+const STICKER_ASSET_EXTENSIONS = [".gif", ".png", ".jpg", ".jpeg", ".webp"];
 const STICKER_TAG_GUIDANCE = "Reuse existing tags when they fit. Otherwise create short new tags; new tags are added to the tag list.";
 const STICKER_DESC_GUIDANCE = `Prefer descs of ${MIN_STICKER_DESC_CHARS} or more characters. If readable text exists, append it after the short scene description.`;
 const STICKER_DESC_FIELD_DESCRIPTION = `A concrete sticker description. ${STICKER_DESC_GUIDANCE}`;
@@ -227,7 +229,12 @@ class StickerService {
       return false;
     }
     const contextTokens = loadPersistedContextTokens(this.config, account.accountId);
-    const contextToken = normalizeText(contextTokens[targetUserId]);
+    const contextToken = resolveCurrentChatContextToken({
+      sessionStore: this.sessionStore,
+      context,
+      userId: targetUserId,
+      fallbackContextToken: contextTokens[targetUserId],
+    });
     if (!contextToken) {
       return false;
     }
@@ -328,7 +335,15 @@ function loadStickerTagsFileSync(filePath = "") {
 }
 
 function resolveStickerFilePath(config = {}, stickerId = "") {
-  return path.join(buildStickerPaths(config).stickerAssetsDir, `${normalizeStickerId(stickerId)}.gif`);
+  const normalizedStickerId = normalizeStickerId(stickerId);
+  const assetsDir = buildStickerPaths(config).stickerAssetsDir;
+  for (const extension of STICKER_ASSET_EXTENSIONS) {
+    const candidate = path.join(assetsDir, `${normalizedStickerId}${extension}`);
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return path.join(assetsDir, `${normalizedStickerId}.gif`);
 }
 
 function normalizeStickerTags(tags) {
@@ -549,14 +564,14 @@ async function saveStickerEntry({
   item = {},
 } = {}) {
   const tempDir = await fsp.mkdtemp(path.join(os.tmpdir(), "cyberboss-sticker-save-"));
-  const normalizedGifPath = path.join(tempDir, "normalized.gif");
+  const normalizedStickerPath = path.join(tempDir, `normalized${resolveSavedStickerExtension(item.filePath)}`);
   try {
-    await normalizeStickerGif({
+    await normalizeStickerAsset({
       inputPath: item.filePath,
-      outputPath: normalizedGifPath,
+      outputPath: normalizedStickerPath,
       scriptPath: config.stickerNormalizeGifScript,
     });
-    const normalizedBuffer = await fsp.readFile(normalizedGifPath);
+    const normalizedBuffer = await fsp.readFile(normalizedStickerPath);
     const normalizedHash = computeBufferHash(normalizedBuffer);
     const duplicate = findDuplicateStickerByHash(config, index, hashByStickerId, normalizedHash);
     if (duplicate) {
@@ -574,9 +589,12 @@ async function saveStickerEntry({
     }
 
     const stickerId = allocateNextStickerId(index);
-    const stickerPath = resolveStickerFilePath(config, stickerId);
+    const stickerPath = path.join(
+      buildStickerPaths(config).stickerAssetsDir,
+      `${stickerId}${path.extname(normalizedStickerPath).toLowerCase() || ".gif"}`
+    );
     await fsp.mkdir(path.dirname(stickerPath), { recursive: true });
-    await fsp.copyFile(normalizedGifPath, stickerPath);
+    await fsp.copyFile(normalizedStickerPath, stickerPath);
     index[stickerId] = {
       tags: item.tags,
       desc: item.desc,
@@ -597,6 +615,23 @@ async function saveStickerEntry({
   } finally {
     await fsp.rm(tempDir, { recursive: true, force: true }).catch(() => {});
   }
+}
+
+async function normalizeStickerAsset({ inputPath, outputPath, scriptPath }) {
+  if (path.extname(inputPath).toLowerCase() === ".gif") {
+    await fsp.copyFile(inputPath, outputPath);
+    return;
+  }
+  if (process.platform === "darwin") {
+    await normalizeStickerGif({ inputPath, outputPath, scriptPath });
+    return;
+  }
+  await fsp.copyFile(inputPath, outputPath);
+}
+
+function resolveSavedStickerExtension(filePath = "") {
+  const extension = path.extname(normalizeText(filePath)).toLowerCase();
+  return STICKER_ASSET_EXTENSIONS.includes(extension) ? extension : ".gif";
 }
 
 function buildStickerDeletedText(stickerIds) {

@@ -161,6 +161,11 @@ CYBERBOSS_VISION_API_KEY=
 CYBERBOSS_VISION_MODEL=
 CYBERBOSS_VISION_TIMEOUT_MS=30000
 CYBERBOSS_ACCOUNT_ID=
+CYBERBOSS_QQBOT_APP_ID=
+CYBERBOSS_QQBOT_APP_SECRET=
+CYBERBOSS_QQBOT_ALLOWED_USER_IDS=
+CYBERBOSS_QQBOT_ALLOWED_GROUP_IDS=
+CYBERBOSS_QQBOT_PRIMARY_WEIXIN_USER_ID=
 CYBERBOSS_WEIXIN_MIN_CHUNK_CHARS=20
 CYBERBOSS_WEIXIN_BASE_URL=https://ilinkai.weixin.qq.com
 CYBERBOSS_WEIXIN_CDN_BASE_URL=https://novac2c.cdn.weixin.qq.com/c2c
@@ -214,6 +219,12 @@ CYBERBOSS_LOCATION_BATTERY_HISTORY_LIMIT=100
   设置微信短分片合并阈值默认值。
 - `CYBERBOSS_WEIXIN_BASE_URL`、`CYBERBOSS_WEIXIN_CDN_BASE_URL`、`CYBERBOSS_WEIXIN_QR_BOT_TYPE`
   在特殊部署环境下覆盖微信桥接接口地址和二维码 bot 类型。
+- `CYBERBOSS_QQBOT_APP_ID`、`CYBERBOSS_QQBOT_APP_SECRET`
+  QQ 开放平台机器人的 AppID 和 AppSecret。
+- `CYBERBOSS_QQBOT_ALLOWED_USER_IDS`、`CYBERBOSS_QQBOT_ALLOWED_GROUP_IDS`
+  允许接入共享线程的 QQ OpenID 白名单，多个值用逗号分隔。
+- `CYBERBOSS_QQBOT_PRIMARY_WEIXIN_USER_ID`
+  QQ 消息要复用的微信 sender id。它决定 QQ、微信和终端是否落到同一个 runtime thread；只有一个 `CYBERBOSS_ALLOWED_USER_IDS` 时可以留空。
 - `CYBERBOSS_ENABLE_LOCATION_SERVER`
   是否启动内置 whereabouts HTTP 接收服务。
 - `CYBERBOSS_LOCATION_HOST`
@@ -331,6 +342,35 @@ model_catalog_json = "/绝对路径/.codex/local-models.json"
 ```text
 /bind /绝对路径
 ```
+
+### QQBot 接入同一条线程
+
+本项目的 QQ channel 使用腾讯 [`openclaw-qqbot`](https://github.com/tencent-connect/openclaw-qqbot) 同款 `@tencent-connect/qqbot-nodejs` SDK 和 WebSocket 网关，但消息仍然进入 Cyberboss 已有的 Codex / Claude Code runtime，不会另外启动一套 OpenClaw 会话。
+
+先在 [QQ 开放平台](https://q.qq.com/) 创建机器人并取得 AppID、AppSecret，然后新建不会提交到 Git 的 `.env.qqbot`：
+
+```dotenv
+CYBERBOSS_QQBOT_APP_ID=你的AppID
+CYBERBOSS_QQBOT_APP_SECRET=你的AppSecret
+CYBERBOSS_QQBOT_ALLOWED_USER_IDS=你的QQ用户OpenID
+CYBERBOSS_QQBOT_ALLOWED_GROUP_IDS=
+CYBERBOSS_QQBOT_PRIMARY_WEIXIN_USER_ID=当前微信绑定使用的user id
+```
+
+如果暂时不知道自己的 QQ OpenID，可以短暂把 `CYBERBOSS_QQBOT_ALLOWED_USER_IDS` 设为 `*`，发一条消息后从 Cyberboss 日志确认 OpenID，再立即改成精确值。
+
+启动方式不变：
+
+```bash
+npm run shared:start
+```
+
+同线程成立需要满足两个条件：
+
+- `CYBERBOSS_QQBOT_PRIMARY_WEIXIN_USER_ID` 与现有微信绑定的 sender id 一致；
+- QQ 和微信使用同一个 `CYBERBOSS_WORKSPACE_ROOT`，不要再启动第二套 Cyberboss 进程。
+
+QQ 私聊和群聊分别保留 `qqbot:c2c:<openid>`、`qqbot:group:<openid>` 回复目标，因此回复会回到触发消息的 QQ 会话；runtime thread id 仍复用当前微信/终端线程。
 
 ### 双端监控同一条线程
 

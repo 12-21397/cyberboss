@@ -21,7 +21,8 @@ class SystemMessageDispatcher {
     return normalizeText(message?.workspaceRoot) || normalizeText(this.config.workspaceRoot);
   }
 
-  buildPreparedMessage(message, contextToken = "") {
+  buildPreparedMessage(message, delivery = "") {
+    const deliveryTarget = normalizeDeliveryTarget(delivery);
     return {
       provider: "system",
       workspaceId: this.config.workspaceId,
@@ -33,11 +34,23 @@ class SystemMessageDispatcher {
       text: buildSystemInboundText(message?.text, message?.createdAt),
       attachments: [],
       command: "message",
-      contextToken,
+      contextToken: deliveryTarget.contextToken,
       receivedAt: normalizeIsoTime(message?.createdAt) || new Date().toISOString(),
       workspaceRoot: this.resolveWorkspaceRoot(message),
     };
   }
+}
+
+function normalizeDeliveryTarget(value) {
+  if (typeof value === "string") {
+    return { contextToken: value.trim() };
+  }
+  if (!value || typeof value !== "object") {
+    return { contextToken: "" };
+  }
+  return {
+    contextToken: normalizeText(value.contextToken),
+  };
 }
 
 function buildSystemInboundText(text, createdAt = "") {
@@ -50,7 +63,7 @@ function buildSystemInboundText(text, createdAt = "") {
     "If you act, end with send_message that briefly and naturally reflects what you did or what changed; use silent only if you do nothing.",
     "Return exactly one JSON object after any tool calls:",
     "{\"action\":\"silent\"}",
-    "{\"action\":\"send_message\",\"message\":\"<one short natural WeChat message>\"}",
+    "{\"action\":\"send_message\",\"message\":\"<one short natural chat message>\"}",
     "No markdown fences. No reasoning. No text outside the JSON.",
   ];
   if (body) {

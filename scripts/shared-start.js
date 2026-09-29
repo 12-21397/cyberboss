@@ -7,6 +7,7 @@ const {
   removePidFileIfMatches,
   ensureSharedAppServer,
   ensureBridgeNotRunning,
+  stopSharedProcesses,
 } = require("./shared-common");
 
 async function main() {
@@ -36,20 +37,40 @@ async function main() {
     cwd: rootDir,
     env: childEnv,
     stdio: "inherit",
+    windowsHide: true,
   });
 
   writePidFile(bridgePidFile, child.pid);
   const cleanup = () => removePidFileIfMatches(bridgePidFile, child.pid);
+  let shuttingDown = false;
+  const shutdown = async (signal) => {
+    if (shuttingDown) {
+      return;
+    }
+    shuttingDown = true;
+    try {
+      await stopSharedProcesses();
+    } catch (error) {
+      console.error(error.message || String(error));
+      process.exitCode = 1;
+    } finally {
+      cleanup();
+      process.exit(process.exitCode || (signal === "SIGINT" ? 130 : 143));
+    }
+  };
   process.on("exit", cleanup);
   process.on("SIGINT", () => {
-    child.kill("SIGINT");
+    void shutdown("SIGINT");
   });
   process.on("SIGTERM", () => {
-    child.kill("SIGTERM");
+    void shutdown("SIGTERM");
   });
 
   child.on("exit", (code, signal) => {
     cleanup();
+    if (shuttingDown) {
+      return;
+    }
     if (signal) {
       process.kill(process.pid, signal);
       return;

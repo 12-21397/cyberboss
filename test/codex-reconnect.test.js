@@ -67,11 +67,12 @@ test("codex adapter reinitializes when the websocket transport has dropped", asy
   };
 
   try {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cyberboss-codex-reconnect-"));
     const { createCodexRuntimeAdapter } = require(indexPath);
     const adapter = createCodexRuntimeAdapter({
-      sessionsFile: path.join(__dirname, "..", "tmp", "codex-reconnect-sessions.json"),
+      sessionsFile: path.join(tempDir, "codex-reconnect-sessions.json"),
       codexEndpoint: "ws://127.0.0.1:8765",
-      stateDir: path.join(__dirname, "..", "tmp"),
+      stateDir: tempDir,
     });
 
     await adapter.initialize();

@@ -1,5 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const os = require("node:os");
+const path = require("node:path");
 
 const { TimelineService } = require("../src/services/timeline-service");
 
@@ -151,8 +153,9 @@ test("timeline service rejects mixed structured and raw event sources", async ()
 
 test("timeline service serializes structured screenshot options", async () => {
   const { service, calls } = createService();
+  const outputFile = path.join(os.tmpdir(), "timeline-shot.png");
   const result = await service.captureScreenshot({
-    outputFile: "/tmp/timeline-shot.png",
+    outputFile,
     selector: "analytics",
     range: "day",
     date: "2026-04-21",
@@ -164,12 +167,12 @@ test("timeline service serializes structured screenshot options", async () => {
     locale: "zh-CN",
   });
 
-  assert.equal(result.outputFile, "/tmp/timeline-shot.png");
+  assert.equal(result.outputFile, outputFile);
   assert.deepEqual(calls, [
     {
       subcommand: "screenshot",
       args: [
-        "--output", "/tmp/timeline-shot.png",
+        "--output", outputFile,
         "--selector", "analytics",
         "--range", "day",
         "--date", "2026-04-21",

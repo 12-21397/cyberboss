@@ -5,6 +5,7 @@ const {
   bridgePidFile,
   readPidFile,
   isPidAlive,
+  getListeningPid,
 } = require("./shared-common");
 
 async function main() {
@@ -13,6 +14,8 @@ async function main() {
   console.log(`runtime=${runtime}`);
   console.log(`listen=${listenUrl}`);
   printPidState("shared_app_server_pid", appServerPidFile);
+  const listenerPid = getListeningPid();
+  console.log(`shared_app_server_listener_pid=${listenerPid || "missing"}`);
   printPidState("shared_cyberboss_pid", bridgePidFile);
   if (!isCodex) {
     console.log(`readyz=skipped`);

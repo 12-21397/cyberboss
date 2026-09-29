@@ -394,8 +394,9 @@ class StreamDelivery {
   async sendTextWithRetry(state, payload, { kind }) {
     const initialTarget = state.replyTarget;
     try {
-      await this.channelAdapter.sendText(payload);
-      return;
+      const result = await this.channelAdapter.sendText(payload);
+      await this.deferOverflowReply(state, result?.overflowText, kind);
+      return result;
     } catch (error) {
       const retryTarget = this.resolveRetriableReplyTarget(initialTarget, error);
       if (!retryTarget) {
@@ -417,7 +418,7 @@ class StreamDelivery {
         if (payload.preserveBlock) {
           retryPayload.preserveBlock = true;
         }
-        await this.channelAdapter.sendText(retryPayload);
+        const result = await this.channelAdapter.sendText(retryPayload);
         state.replyTarget = retryTarget;
         if (state.bindingKey) {
           this.replyTargetByBindingKey.set(state.bindingKey, {
@@ -426,6 +427,8 @@ class StreamDelivery {
             provider: retryTarget.provider,
           });
         }
+        await this.deferOverflowReply(state, result?.overflowText, kind);
+        return result;
       } catch (retryError) {
         const deferred = await this.deferSystemReply(state, payload.text, retryError, kind);
         if (deferred) {
@@ -434,6 +437,29 @@ class StreamDelivery {
         throw retryError;
       }
     }
+  }
+
+  async deferOverflowReply(state, text, kind = "plain_reply") {
+    const normalizedText = typeof text === "string" ? text : "";
+    if (!normalizedText || typeof this.onDeferredSystemReply !== "function") {
+      return false;
+    }
+    const target = state?.replyTarget || {};
+    if (!target.userId) {
+      return false;
+    }
+    const error = new Error("Weixin delivery exceeded the 10-message limit; remaining text was deferred.");
+    await this.onDeferredSystemReply({
+      threadId: state.threadId,
+      userId: target.userId,
+      text: normalizedText,
+      error,
+      kind,
+    });
+    console.warn(
+      `[cyberboss] deferred Weixin overflow until the next inbound message thread=${state.threadId} user=${target.userId}`
+    );
+    return true;
   }
 
   async deferSystemReply(state, text, error, kind = "plain_reply") {

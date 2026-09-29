@@ -84,6 +84,8 @@ function normalizeSystemMessage(message) {
   const senderId = normalizeText(message.senderId);
   const workspaceRoot = normalizeText(message.workspaceRoot);
   const text = normalizeText(message.text);
+  const contextToken = normalizeText(message.contextToken);
+  const deliveryMode = normalizeDeliveryMode(message.deliveryMode);
   const createdAt = normalizeIsoTime(message.createdAt);
 
   if (!id || !accountId || !senderId || !workspaceRoot || !text) {
@@ -96,8 +98,15 @@ function normalizeSystemMessage(message) {
     senderId,
     workspaceRoot,
     text,
+    ...(contextToken ? { contextToken } : {}),
+    ...(deliveryMode ? { deliveryMode } : {}),
     createdAt: createdAt || new Date().toISOString(),
   };
+}
+
+function normalizeDeliveryMode(value) {
+  const normalized = normalizeText(value).toLowerCase();
+  return normalized === "last_active" ? normalized : "";
 }
 
 function normalizeIsoTime(value) {

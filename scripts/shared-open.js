@@ -1,10 +1,16 @@
-const { spawn } = require("child_process");
+﻿const { spawn } = require("child_process");
 const net = require("net");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const readline = require("readline");
 const {
+  buildCodexHttpMcpConfigArgs,
+  buildCodexMcpConfigArgs,
+  resolveCodexProjectToolMcpServerConfig,
+} = require("../src/adapters/runtime/codex/mcp-config");
+const {
+  rootDir,
   listenUrl,
   ensureSharedAppServer,
   resolveBoundThread,
@@ -17,7 +23,19 @@ async function main() {
   if (runtime === "codex") {
     await ensureSharedAppServer();
     const { threadId, workspaceRoot: resolvedWorkspaceRoot } = resolveBoundThread(workspaceRoot);
-    const child = spawn(process.env.CYBERBOSS_CODEX_COMMAND || "codex", [
+    const command = process.env.CYBERBOSS_CODEX_COMMAND || "codex";
+    const mcpConfigArgs = buildCodexMcpConfigArgs(resolveCodexProjectToolMcpServerConfig({
+      cyberbossHome: process.env.CYBERBOSS_HOME || rootDir,
+    })).concat(buildCodexHttpMcpConfigArgs({
+    name: "ombre_brain",
+    url: process.env.CYBERBOSS_OMBRE_MCP_URL,
+  })).concat(buildCodexHttpMcpConfigArgs({
+    name: "galatea-garden",
+    url: process.env.CYBERBOSS_GALATEA_GARDEN_MCP_URL,
+    bearerTokenEnvVar: "GALATEA_GARDEN_MCP_TOKEN",
+  }));
+    const commandArgs = [
+      ...mcpConfigArgs,
       "resume",
       threadId,
       "--remote",
@@ -25,9 +43,11 @@ async function main() {
       "-C",
       resolvedWorkspaceRoot,
       ...process.argv.slice(2),
-    ], {
+    ];
+    const isCmdFile = process.platform === "win32" && /\.(?:cmd|bat)$/i.test(command);
+    const child = spawn(isCmdFile ? "cmd.exe" : command, isCmdFile ? ["/d", "/c", command, ...commandArgs] : commandArgs, {
       stdio: "inherit",
-      shell: process.platform === "win32",
+      windowsHide: true,
     });
 
     child.on("exit", (code, signal) => {
@@ -162,19 +182,19 @@ function handleIpcMessage(msg) {
         turnCount += 1;
         break;
       case "reply.completed":
-        console.log(`\n${c.cyan}[ClaudeCode → WeChat]${c.reset}\n${event.text}\n`);
+        console.log(`\n${c.cyan}[ClaudeCode 鈫?WeChat]${c.reset}\n${event.text}\n`);
         break;
       case "turn.completed":
         if (event.text) {
-          console.log(`\n${c.cyan}[ClaudeCode → WeChat]${c.reset}\n${event.text}\n`);
+          console.log(`\n${c.cyan}[ClaudeCode 鈫?WeChat]${c.reset}\n${event.text}\n`);
         }
-        console.log(`${c.gray}─────────────────────────${c.reset}`);
+        console.log(`${c.gray}鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€${c.reset}`);
         break;
       case "tool.use": {
         const inputStr = event.input
           ? JSON.stringify(event.input, null, 2)
           : "";
-        console.log(`\n${c.yellow}● ${formatReadableToolName(event.toolName) || "Tool"}${c.reset}`);
+        console.log(`\n${c.yellow}鈼?${formatReadableToolName(event.toolName) || "Tool"}${c.reset}`);
         if (inputStr) {
           console.log(inputStr.split("\n").map((l) => `  ${l}`).join("\n"));
         }
@@ -186,7 +206,7 @@ function handleIpcMessage(msg) {
           ? `${c.red}ERROR${c.reset}`
           : `${c.green}OK${c.reset}`;
         const bulletColor = event.isError ? c.red : c.green;
-        console.log(`\n  ${bulletColor}● ${status}${c.reset}`);
+        console.log(`\n  ${bulletColor}鈼?${status}${c.reset}`);
         if (event.toolResult) {
           console.log(event.toolResult.split("\n").map((l) => `    ${l}`).join("\n"));
         }
@@ -205,7 +225,7 @@ function handleIpcMessage(msg) {
           : "";
         console.log(`\n${c.magenta}[Approval] ${formatReadableToolName(event.toolName) || ""}${c.reset}`);
         if (inputStr) console.log(inputStr);
-        console.log(`${c.gray}─────────────────────────${c.reset}`);
+        console.log(`${c.gray}鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€${c.reset}`);
         console.log(`Reply: ${c.green}/yes${c.reset}  ${c.yellow}/always${c.reset}  ${c.red}/no${c.reset}\n`);
         break;
       }
@@ -219,7 +239,7 @@ function handleIpcMessage(msg) {
   } else if (msg.type === "stderr") {
     console.log(`[stderr] ${msg.text}`);
   } else if (msg.type === "inboundMessage") {
-    console.log(`\n${c.cyan}[WeChat → ClaudeCode]${c.reset}\n${msg.text || ""}\n`);
+    console.log(`\n${c.cyan}[WeChat 鈫?ClaudeCode]${c.reset}\n${msg.text || ""}\n`);
   }
 }
 

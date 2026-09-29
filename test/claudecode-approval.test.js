@@ -257,7 +257,7 @@ test("claudecode assistant events map usage into context snapshots", () => {
 });
 
 test("claudecode adapter dispatches turns only after a real session id is available", async () => {
-  const tempDir = fs.mkdtempSync(path.join("/tmp", "cb-claude-"));
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cb-claude-"));
   const workspaceRoot = path.join(tempDir, "workspace");
   const stateDir = path.join(tempDir, "state");
   fs.mkdirSync(workspaceRoot, { recursive: true });
@@ -385,7 +385,7 @@ test("claudecode runtime params are isolated from codex model selections", () =>
 });
 
 test("claudecode adapter does not pass a codex-selected model to Claude Code", async () => {
-  const tempDir = fs.mkdtempSync(path.join("/tmp", "cb-claude-model-"));
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cb-claude-model-"));
   const workspaceRoot = path.join(tempDir, "workspace");
   const stateDir = path.join(tempDir, "state");
   fs.mkdirSync(workspaceRoot, { recursive: true });
@@ -1207,6 +1207,7 @@ test("session store does not reuse legacy thread ids across runtimes", () => {
 });
 
 test("codex session store reads runtime-scoped thread ids", () => {
+  const workspaceRoot = path.resolve("/workspace");
   const sessionsFile = path.join(
     os.tmpdir(),
     `cyberboss-codex-runtime-scoped-${Date.now()}-${Math.random().toString(16).slice(2)}.json`
@@ -1214,10 +1215,10 @@ test("codex session store reads runtime-scoped thread ids", () => {
   fs.writeFileSync(sessionsFile, JSON.stringify({
     bindings: {
       "binding-1": {
-        activeWorkspaceRoot: "/workspace",
+        activeWorkspaceRoot: workspaceRoot,
         threadIdByWorkspaceRootByRuntime: {
           codex: {
-            "/workspace": "codex-thread",
+            [workspaceRoot]: "codex-thread",
           },
         },
       },
@@ -1226,11 +1227,11 @@ test("codex session store reads runtime-scoped thread ids", () => {
 
   const codexStore = new SessionStore({ filePath: sessionsFile, runtimeId: "codex" });
 
-  assert.equal(codexStore.getThreadIdForWorkspace("binding-1", "/workspace"), "codex-thread");
-  assert.deepEqual(codexStore.listWorkspaceRoots("binding-1"), ["/workspace"]);
+  assert.equal(codexStore.getThreadIdForWorkspace("binding-1", workspaceRoot), "codex-thread");
+  assert.deepEqual(codexStore.listWorkspaceRoots("binding-1"), [workspaceRoot]);
   assert.deepEqual(codexStore.findBindingForThreadId("codex-thread"), {
     bindingKey: "binding-1",
-    workspaceRoot: "/workspace",
+    workspaceRoot,
   });
 });
 

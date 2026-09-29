@@ -16,6 +16,27 @@ function readConfig() {
     userGender: readTextEnv("CYBERBOSS_USER_GENDER") || "female",
     allowedUserIds: readListEnv("CYBERBOSS_ALLOWED_USER_IDS"),
     channel: readTextEnv("CYBERBOSS_CHANNEL") || "weixin",
+    telegramBotToken: readTextEnv("CYBERBOSS_TELEGRAM_BOT_TOKEN"),
+    telegramAllowedUserIds: readListEnv("CYBERBOSS_TELEGRAM_ALLOWED_USER_IDS"),
+    telegramAllowedGroupIds: readListEnv("CYBERBOSS_TELEGRAM_ALLOWED_GROUP_IDS"),
+    telegramPrimaryWeixinUserId: readTextEnv("CYBERBOSS_CHECKIN_USER_ID"),
+    telegramOffsetFile: path.join(stateDir, "telegram-offset.json"),
+    telegramGroupContextFile: path.join(stateDir, "telegram-group-context.jsonl"),
+    telegramGroupDiscoveryFile: path.join(stateDir, "telegram-group-discovery.jsonl"),
+    telegramTtsEnabled: readOptionalBoolEnv("CYBERBOSS_TELEGRAM_TTS_ENABLED"),
+    qqbotAppId: readTextEnv("CYBERBOSS_QQBOT_APP_ID") || readTextEnv("QQBOT_APP_ID"),
+    qqbotAppSecret: readTextEnv("CYBERBOSS_QQBOT_APP_SECRET") || readTextEnv("QQBOT_APP_SECRET"),
+    qqbotAllowedUserIds: readListEnv("CYBERBOSS_QQBOT_ALLOWED_USER_IDS"),
+    qqbotAllowedGroupIds: readListEnv("CYBERBOSS_QQBOT_ALLOWED_GROUP_IDS"),
+    qqbotPrimaryWeixinUserId: readTextEnv("CYBERBOSS_QQBOT_PRIMARY_WEIXIN_USER_ID")
+      || readTextEnv("CYBERBOSS_CHECKIN_USER_ID"),
+    qqbotBaseUrl: readTextEnv("CYBERBOSS_QQBOT_BASE_URL") || "https://api.sgroup.qq.com",
+    qqbotTokenBaseUrl: readTextEnv("CYBERBOSS_QQBOT_TOKEN_BASE_URL") || "https://bots.qq.com",
+    qqbotStateDir: path.join(stateDir, "qqbot"),
+    elevenLabsApiKey: readTextEnv("ELEVENLABS_API_KEY"),
+    elevenLabsVoiceId: readTextEnv("ELEVENLABS_VOICE_ID"),
+    elevenLabsModelId: readTextEnv("ELEVENLABS_MODEL_ID") || "eleven_v3",
+    elevenLabsOutputFormat: readTextEnv("ELEVENLABS_OUTPUT_FORMAT") || "mp3_44100_128",
     runtime: readTextEnv("CYBERBOSS_RUNTIME") || "codex",
     timelineCommand: readTextEnv("CYBERBOSS_TIMELINE_COMMAND") || "timeline-for-agent",
     accountId: readTextEnv("CYBERBOSS_ACCOUNT_ID"),
@@ -23,6 +44,7 @@ function readConfig() {
     weixinCdnBaseUrl: readTextEnv("CYBERBOSS_WEIXIN_CDN_BASE_URL") || "https://novac2c.cdn.weixin.qq.com/c2c",
     weixinConfigFile: path.join(stateDir, "weixin-config.json"),
     weixinMinChunkChars: readIntEnv("CYBERBOSS_WEIXIN_MIN_CHUNK_CHARS"),
+    inboundTextSettleMs: readIntEnv("CYBERBOSS_INBOUND_TEXT_SETTLE_MS") || 0,
     weixinQrBotType: readTextEnv("CYBERBOSS_WEIXIN_QR_BOT_TYPE") || "3",
     accountsDir: path.join(stateDir, "accounts"),
     reminderQueueFile: path.join(stateDir, "reminder-queue.json"),
@@ -31,6 +53,7 @@ function readConfig() {
     checkinConfigFile: path.join(stateDir, "checkin-config.json"),
     timelineScreenshotQueueFile: path.join(stateDir, "timeline-screenshot-queue.json"),
     projectToolContextFile: path.join(stateDir, "project-tool-runtime-context.json"),
+    conversationDir: path.join(stateDir, "conversations"),
     weixinInstructionsFile: path.join(stateDir, "weixin-instructions.md"),
     weixinOperationsFile: path.resolve(__dirname, "..", "..", "templates", "weixin-operations.md"),
     stickersDir: path.join(stateDir, "stickers"),
@@ -41,6 +64,19 @@ function readConfig() {
     stickersTemplateIndexFile: path.resolve(__dirname, "..", "..", "templates", "stickers", "index.json"),
     stickerTagsTemplateFile: path.resolve(__dirname, "..", "..", "templates", "stickers", "tags.json"),
     stickerNormalizeGifScript: path.resolve(__dirname, "..", "..", "scripts", "normalize-sticker-gif.js"),
+    memoryArchiveDir: path.join(stateDir, "memory", "archive"),
+    relationshipCoreFile: path.join(stateDir, "memory", "relationship_core.md"),
+    routineAnchorsFile: path.join(stateDir, "memory", "routine_anchors.md"),
+    currentStateFile: path.join(stateDir, "memory", "current_state.md"),
+    phoneActivityFile: path.join(stateDir, "phone-activity.json"),
+    phoneActivityHost: readTextEnv("CYBERBOSS_PHONE_ACTIVITY_HOST") || "0.0.0.0",
+    phoneActivityPort: readIntEnv("CYBERBOSS_PHONE_ACTIVITY_PORT") || 4319,
+    phoneActivityToken: readTextEnv("CYBERBOSS_PHONE_ACTIVITY_TOKEN"),
+    phoneActivityHistoryLimit: readIntEnv("CYBERBOSS_PHONE_ACTIVITY_HISTORY_LIMIT") || 300,
+    startWithPhoneActivityServer: resolvePhoneActivityServerEnabled({
+      mode,
+      enabled: readOptionalBoolEnv("CYBERBOSS_ENABLE_PHONE_ACTIVITY_SERVER"),
+    }),
     diaryDir: path.join(stateDir, "diary"),
     locationStoreFile: path.join(stateDir, "locations.json"),
     locationHost: readTextEnv("CYBERBOSS_LOCATION_HOST") || "0.0.0.0",
@@ -162,6 +198,16 @@ function hasArgFlag(argv, flag) {
 }
 
 function resolveLocationServerEnabled({ mode, enabled }) {
+  if (mode !== "start") {
+    return false;
+  }
+  if (typeof enabled === "boolean") {
+    return enabled;
+  }
+  return false;
+}
+
+function resolvePhoneActivityServerEnabled({ mode, enabled }) {
   if (mode !== "start") {
     return false;
   }

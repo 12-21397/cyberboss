@@ -1,5 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const os = require("node:os");
 const path = require("node:path");
 
 const { CodexRpcClient } = require("../src/adapters/runtime/codex/rpc-client");
@@ -27,6 +28,7 @@ test("codex rpc client uses turn/interrupt for stop requests", async () => {
 });
 
 test("codex rpc client sends image attachments as local images", async () => {
+  const imagePath = path.join(os.tmpdir(), "cyberboss image.jpg");
   const client = new CodexRpcClient({ endpoint: "ws://127.0.0.1:8765" });
   const calls = [];
   client.sendRequest = async (method, params) => {
@@ -38,7 +40,7 @@ test("codex rpc client sends image attachments as local images", async () => {
     threadId: "thread-1",
     text: "what is this image?",
     attachments: [{
-      absolutePath: path.join("/tmp", "cyberboss image.jpg"),
+      absolutePath: imagePath,
       contentType: "image/jpeg",
     }],
   });
@@ -48,7 +50,7 @@ test("codex rpc client sends image attachments as local images", async () => {
     { type: "text", text: "what is this image?" },
     {
       type: "localImage",
-      path: "/tmp/cyberboss image.jpg",
+      path: imagePath,
     },
   ]);
 });

@@ -161,7 +161,7 @@ function mapMcpElicitationToApprovalEvent(message, threadId, turnId, params) {
   const toolName = extractToolNameFromMcpPrompt(promptMessage);
   const commandTokens = toolName
     ? buildApprovalMatchTokens({ toolName: `mcp__${serverName}__${toolName}` })
-    : [];
+    : buildMcpServerMatchTokens(serverName);
   const command = buildMcpElicitationCommand({
     toolName,
     promptMessage,
@@ -243,6 +243,11 @@ function extractToolNameFromMcpPrompt(promptMessage) {
   }
   const bareMatch = normalized.match(/run tool\s+([a-z0-9_.:-]+)/iu);
   return bareMatch?.[1] ? bareMatch[1].trim() : "";
+}
+
+function buildMcpServerMatchTokens(serverName) {
+  const normalized = normalizeString(serverName);
+  return normalized ? ["mcp_tool", normalized] : [];
 }
 
 function buildMcpToolCallResponseTemplate() {

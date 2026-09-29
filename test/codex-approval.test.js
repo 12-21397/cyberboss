@@ -3,7 +3,23 @@ const assert = require("node:assert/strict");
 
 const { CyberbossApp } = require("../src/core/app");
 const { mapCodexMessageToRuntimeEvent } = require("../src/adapters/runtime/codex/events");
-const { buildCodexMcpConfigArgs } = require("../src/adapters/runtime/codex/mcp-config");
+const {
+  buildCodexHttpMcpConfigArgs,
+  buildCodexMcpConfigArgs,
+} = require("../src/adapters/runtime/codex/mcp-config");
+
+test("HTTP MCP config supports bearer tokens from environment variables", () => {
+  assert.deepEqual(buildCodexHttpMcpConfigArgs({
+    name: "galatea-garden",
+    url: "https://galatea.example/mcp",
+    bearerTokenEnvVar: "GALATEA_GARDEN_MCP_TOKEN",
+  }), [
+    "-c",
+    "mcp_servers.galatea-garden.url=\"https://galatea.example/mcp\"",
+    "-c",
+    "mcp_servers.galatea-garden.bearer_token_env_var=\"GALATEA_GARDEN_MCP_TOKEN\"",
+  ]);
+});
 
 test("codex MCP config auto-approves cyberboss tools", () => {
   const args = buildCodexMcpConfigArgs({
@@ -83,6 +99,32 @@ test("codex MCP elicitation approvals map to runtime approval events", () => {
   assert.deepEqual(event.payload.responseTemplate.responseByCommand.no, {
     action: "cancel",
   });
+});
+
+test("codex MCP elicitation approvals fall back to the server prefix when tool name is missing", () => {
+  const event = mapCodexMessageToRuntimeEvent({
+    id: "req-mcp-2",
+    method: "mcpServer/elicitation/request",
+    params: {
+      serverName: "cyberboss_tools",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      mode: "form",
+      _meta: {
+        codex_approval_kind: "mcp_tool_call",
+        persist: ["session"],
+      },
+      message: "Allow the cyberboss_tools MCP server to run this tool?",
+      requestedSchema: {
+        type: "object",
+        properties: {},
+      },
+    },
+  });
+
+  assert.equal(event.type, "runtime.approval.requested");
+  assert.deepEqual(event.payload.commandTokens, ["mcp_tool", "cyberboss_tools"]);
+  assert.equal(event.payload.reason, "cyberboss_tools");
 });
 
 test("handleRuntimeEvent auto-approves project-native Codex MCP elicitation approvals", async () => {

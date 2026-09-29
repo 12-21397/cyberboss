@@ -1,8 +1,10 @@
-const { createWeixinChannelAdapter } = require("../adapters/channel/weixin");
+const { createChannelRouter } = require("../adapters/channel");
 const { SessionStore } = require("../adapters/runtime/codex/session-store");
 const { createTimelineIntegration } = require("../integrations/timeline");
 const { ChannelFileService } = require("../services/channel-file-service");
 const { DiaryService } = require("../services/diary-service");
+const { MemoryArchive } = require("../services/memory-archive");
+const { PhoneActivityService } = require("../services/phone-activity-service");
 const { ReminderService } = require("../services/reminder-service");
 const { StickerService } = require("../services/sticker-service");
 const { SystemMessageService } = require("../services/system-message-service");
@@ -16,14 +18,17 @@ function createProjectTooling(config, options = {}) {
     filePath: config.sessionsFile,
     runtimeId: config.runtime || "codex",
   });
-  const channelAdapter = options.channelAdapter || createWeixinChannelAdapter(config);
+  const channelAdapter = options.channelAdapter || createChannelRouter(config);
   const timelineIntegration = options.timelineIntegration || createTimelineIntegration(config);
   const runtimeContextStore = options.runtimeContextStore || new RuntimeContextStore({
     filePath: config.projectToolContextFile,
   });
   const channelFile = new ChannelFileService({ config, channelAdapter, sessionStore });
   const services = {
+    config,
     diary: new DiaryService({ config }),
+    memoryArchive: new MemoryArchive({ archiveDir: config.memoryArchiveDir }),
+    phoneActivity: new PhoneActivityService({ config }),
     reminder: new ReminderService({ config, sessionStore }),
     system: new SystemMessageService({ config, sessionStore }),
     channelFile,

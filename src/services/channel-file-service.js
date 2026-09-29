@@ -22,11 +22,16 @@ class ChannelFileService {
         sessionStore: this.sessionStore,
       });
     if (!targetUserId) {
-      throw new Error("Cannot determine which WeChat user should receive the file.");
+      throw new Error("Cannot determine which current-chat user should receive the file.");
     }
 
     const contextTokens = loadPersistedContextTokens(this.config, account.accountId);
-    const contextToken = String(contextTokens[targetUserId] || "").trim();
+    const contextToken = resolveCurrentChatContextToken({
+      sessionStore: this.sessionStore,
+      context,
+      userId: targetUserId,
+      fallbackContextToken: contextTokens[targetUserId],
+    });
     if (!contextToken) {
       throw new Error(`Cannot find a context token for user ${targetUserId}. Let this user talk to the bot once first.`);
     }
@@ -67,4 +72,21 @@ function normalizeText(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-module.exports = { ChannelFileService };
+function resolveCurrentChatContextToken({
+  sessionStore = null,
+  context = {},
+  userId = "",
+  fallbackContextToken = "",
+} = {}) {
+  const bindingKey = normalizeText(context?.bindingKey);
+  const normalizedUserId = normalizeText(userId);
+  if (bindingKey && typeof sessionStore?.getLastReplyTarget === "function") {
+    const target = sessionStore.getLastReplyTarget(bindingKey);
+    if (normalizeText(target?.userId) === normalizedUserId && normalizeText(target?.contextToken)) {
+      return normalizeText(target.contextToken);
+    }
+  }
+  return normalizeText(fallbackContextToken);
+}
+
+module.exports = { ChannelFileService, resolveCurrentChatContextToken };

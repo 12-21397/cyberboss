@@ -1,4 +1,6 @@
 const { WhereaboutsToolHost } = require("whereabouts-mcp");
+const { CoReadingToolHost } = require("./co-reading-tool-host");
+const { loadExternalToolPlugins } = require("./external-tool-plugins");
 const {
   STICKER_DESC_GUIDANCE,
   STICKER_DESC_FIELD_DESCRIPTION,
@@ -36,7 +38,7 @@ class ProjectToolHost {
     }
     for (const host of this.extraToolHosts) {
       if (host.listTools().some((tool) => tool.name === toolName)) {
-        return await host.invokeTool(toolName, normalizedArgs);
+        return await host.invokeTool(toolName, normalizedArgs, this.resolveContext(context));
       }
     }
     throw new Error(`Unknown tool: ${toolName}`);
@@ -93,6 +95,24 @@ const PROJECT_TOOLS = [
     },
   },
   {
+    name: "phone_activity_snapshot",
+    description: "Return the latest tracked iPhone app, today's tracked durations, and recent open/close events.",
+    shortHint: "Read the latest phone activity snapshot for configured iPhone app automations.",
+    topics: ["phone", "activity", "screen-time"],
+    inputSchema: {
+      type: "object",
+      properties: {},
+      additionalProperties: false,
+    },
+    async handler({ services }) {
+      const result = services.phoneActivity.snapshot();
+      return {
+        text: "Phone activity snapshot loaded.",
+        data: result,
+      };
+    },
+  },
+  {
     name: "cyberboss_reminder_create",
     description: "Create a reminder in Cyberboss.",
     shortHint: "Create a reminder with direct text plus delayMinutes or dueAt.",
@@ -104,7 +124,7 @@ const PROJECT_TOOLS = [
         text: { type: "string", description: "Reminder text to send back later." },
         delayMinutes: { type: "integer", description: "Minutes from now before the reminder fires." },
         dueAt: { type: "string", description: "Absolute time such as 2026-04-07T21:30+08:00." },
-        userId: { type: "string", description: "Optional explicit WeChat user id." },
+        userId: { type: "string", description: "Optional explicit shared user id." },
       },
       additionalProperties: false,
     },
@@ -141,8 +161,8 @@ const PROJECT_TOOLS = [
   },
   {
     name: "cyberboss_channel_send_file",
-    description: "Send an existing local file back to the current WeChat chat.",
-    shortHint: "Send a local file back to the current WeChat user.",
+    description: "Send an existing local file back to the current bound channel chat.",
+    shortHint: "Send a local file back to the current channel chat.",
     topics: ["channel"],
     inputSchema: {
       type: "object",
@@ -203,7 +223,7 @@ const PROJECT_TOOLS = [
   },
   {
     name: "cyberboss_sticker_send",
-    description: "Send a saved sticker back to the current WeChat chat by sticker id.",
+    description: "Send a saved sticker back to the current bound channel chat by sticker id.",
     shortHint: "Send a saved sticker by id.",
     topics: ["sticker"],
     inputSchema: {
@@ -211,7 +231,7 @@ const PROJECT_TOOLS = [
       required: ["stickerId"],
       properties: {
         stickerId: { type: "string", description: "Sticker id such as stk_001." },
-        userId: { type: "string", description: "Optional explicit WeChat user id." },
+        userId: { type: "string", description: "Optional explicit shared user id." },
       },
       additionalProperties: false,
     },
@@ -270,7 +290,7 @@ const PROJECT_TOOLS = [
             type: "object",
             required: ["filePath", "tags", "desc"],
             properties: {
-              filePath: { type: "string", description: "Absolute inbox image path under ~/.cyberboss/inbox." },
+              filePath: { type: "string", description: "Absolute inbox image path under the current Cyberboss state inbox directory." },
               tags: {
                 type: "array",
                 description: "One to three sticker tags. New short tags are allowed when the current catalog does not fit.",
@@ -281,7 +301,7 @@ const PROJECT_TOOLS = [
             additionalProperties: false,
           },
         },
-        userId: { type: "string", description: "Optional explicit WeChat user id." },
+        userId: { type: "string", description: "Optional explicit shared user id." },
       },
       additionalProperties: false,
     },
@@ -507,13 +527,13 @@ const PROJECT_TOOLS = [
   },
   {
     name: "cyberboss_timeline_screenshot",
-    description: "Capture a timeline screenshot and send it back to the current WeChat chat.",
+    description: "Capture a timeline screenshot and send it back to the current bound channel chat.",
     shortHint: "Capture a timeline screenshot with structured selection fields.",
     topics: ["timeline"],
     inputSchema: {
       type: "object",
       properties: {
-        userId: { type: "string", description: "Optional explicit WeChat user id." },
+        userId: { type: "string", description: "Optional explicit shared user id." },
         outputFile: { type: "string", description: "Optional absolute output path for the PNG file." },
         selector: { type: "string", description: "main, timeline, analytics, events, or a custom CSS selector." },
         range: { type: "string", description: "Optional range: day, week, or month." },
@@ -546,14 +566,37 @@ const PROJECT_TOOLS = [
   },
 ];
 
+const TOOL_NAMES_FROM_CO_READING = [
+  "reading_import_book",
+  "reading_list_books",
+  "reading_get_manifest",
+  "reading_search",
+  "reading_search_exact",
+  "reading_get_chunk",
+  "reading_get_progress",
+  "reading_build_index",
+  "reading_update_progress",
+  "reading_update_note",
+  "reading_read_note",
+  "reading_resume_book",
+  "reading_link_weread_book",
+  "reading_find_weread_context",
+];
+
 const STATIC_EXTRA_TOOL_NAMES = new WhereaboutsToolHost({ service: null })
   .listTools()
-  .map((tool) => tool.name);
+  .map((tool) => tool.name)
+  .concat(TOOL_NAMES_FROM_CO_READING)
+  .concat(loadExternalToolPlugins().flatMap((plugin) => plugin.toolNames));
 
 function createExtraToolHosts(services = {}) {
   const hosts = [];
   if (services.whereabouts) {
     hosts.push(new WhereaboutsToolHost({ service: services.whereabouts }));
+  }
+  hosts.push(new CoReadingToolHost({ config: services.config }));
+  for (const plugin of loadExternalToolPlugins()) {
+    hosts.push(new plugin.ToolHost({ config: services.config }));
   }
   return hosts;
 }

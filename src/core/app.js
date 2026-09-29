@@ -2,7 +2,7 @@ const os = require("os");
 const path = require("path");
 const crypto = require("crypto");
 const fs = require("fs");
-const { createWeixinChannelAdapter } = require("../adapters/channel/weixin");
+const { createChannelRouter } = require("../adapters/channel");
 const { DEFAULT_MIN_WEIXIN_CHUNK, MAX_MIN_WEIXIN_CHUNK } = require("../adapters/channel/weixin/config-store");
 const { persistIncomingWeixinAttachments } = require("../adapters/channel/weixin/media-receive");
 const { createCodexRuntimeAdapter } = require("../adapters/runtime/codex");
@@ -19,6 +19,7 @@ const {
   takeImageOnlyBatchMessages,
 } = require("./inbound-turn");
 const { resolveVisionContext } = require("../services/vision-context");
+const { ConversationRecorder } = require("../services/conversation-recorder");
 const {
   buildWeixinHelpText,
 } = require("./command-registry");
@@ -61,7 +62,7 @@ function createRuntimeAdapter(config) {
 class CyberbossApp {
   constructor(config) {
     this.config = config;
-    this.channelAdapter = createWeixinChannelAdapter(config);
+    this.channelAdapter = createChannelRouter(config);
     this.timelineIntegration = createTimelineIntegration(config);
     const projectTooling = createProjectTooling(config, {
       channelAdapter: this.channelAdapter,
@@ -77,9 +78,11 @@ class CyberbossApp {
     this.checkinConfigStore = new CheckinConfigStore({ filePath: config.checkinConfigFile });
     this.timelineScreenshotQueue = new TimelineScreenshotQueueStore({ filePath: config.timelineScreenshotQueueFile });
     this.reminderQueue = new ReminderQueueStore({ filePath: config.reminderQueueFile });
+    this.conversationRecorder = new ConversationRecorder({ dirPath: config.conversationDir });
     this.turnGateStore = new TurnGateStore();
     this.pendingInboundByScope = new Map();
     this.pendingImageInboundByScope = new Map();
+    this.pendingTextInboundByScope = new Map();
     this.turnBoundaryScopeKeys = new Set();
     this.systemMessageDispatcher = null;
     this.streamDelivery = new StreamDelivery({
@@ -147,6 +150,9 @@ class CyberbossApp {
     if (this.config.startWithLocationServer) {
       await this.ensureLocationServerStarted();
     }
+    if (this.config.startWithPhoneActivityServer) {
+      await this.ensurePhoneActivityServerStarted();
+    }
     console.log("[cyberboss] bridge loop started; waiting for WeChat messages.");
     if (this.config.startWithCheckin) {
       console.log("[cyberboss] checkin: enabled");
@@ -157,7 +163,9 @@ class CyberbossApp {
 
     const shutdown = createShutdownController(async () => {
       this.clearPendingImageInboundTimers();
+      this.clearPendingTextInboundTimers();
       await this.closeLocationServer();
+      await this.closePhoneActivityServer();
       await this.runtimeAdapter.close();
     });
 
@@ -207,7 +215,9 @@ class CyberbossApp {
     } finally {
       shutdown.dispose();
       this.clearPendingImageInboundTimers();
+      this.clearPendingTextInboundTimers();
       await this.closeLocationServer();
+      await this.closePhoneActivityServer();
       await this.runtimeAdapter.close();
     }
   }
@@ -230,6 +240,24 @@ class CyberbossApp {
       return;
     }
     await this.projectServices.whereabouts.closeServer();
+  }
+
+  async ensurePhoneActivityServerStarted() {
+    if (!this.projectServices?.phoneActivity) {
+      return null;
+    }
+    await this.projectServices.phoneActivity.startServer();
+    console.log(
+      `[cyberboss] phoneActivityServer=http://${this.config.phoneActivityHost}:${this.config.phoneActivityPort} store=${this.config.phoneActivityFile}`
+    );
+    return this.projectServices.phoneActivity.server || null;
+  }
+
+  async closePhoneActivityServer() {
+    if (!this.projectServices?.phoneActivity) {
+      return;
+    }
+    await this.projectServices.phoneActivity.closeServer();
   }
 
   handleLocationAccepted(result) {
@@ -328,8 +356,29 @@ class CyberbossApp {
       return;
     }
 
+    this.archiveIncomingMessage(normalized);
     this.primeDeferredRepliesForSender(normalized);
     await this.handlePreparedMessage(normalized, { allowCommands: true });
+  }
+
+  archiveIncomingMessage(normalized) {
+    this.projectServices.memoryArchive?.archiveMessage({
+      type: "weixin.inbound",
+      accountId: normalized.accountId,
+      senderId: normalized.senderId,
+      chatId: normalized.chatId,
+      threadKey: normalized.threadKey,
+      messageId: normalized.messageId,
+      text: normalized.text,
+      originalText: normalized.originalText,
+      command: normalized.command,
+      attachments: normalized.attachments,
+      attachmentFailures: normalized.attachmentFailures,
+      contextToken: normalized.contextToken,
+      workspaceId: normalized.workspaceId,
+      workspaceRoot: normalized.workspaceRoot,
+      timestamp: normalized.receivedAt || new Date().toISOString(),
+    });
   }
 
   deferSystemReply({ threadId = "", userId = "", text = "", error = null, kind = "plain_reply" }) {
@@ -366,7 +415,8 @@ class CyberbossApp {
   }
 
   async handlePreparedMessage(normalized, { allowCommands }) {
-    const bindingKey = this.runtimeAdapter.getSessionStore().buildBindingKey({
+    const sessionStore = this.runtimeAdapter.getSessionStore();
+    const bindingKey = sessionStore.buildBindingKey({
       workspaceId: normalized.workspaceId,
       accountId: normalized.accountId,
       senderId: normalized.senderId,
@@ -376,8 +426,15 @@ class CyberbossApp {
       contextToken: normalized.contextToken,
       provider: normalized.provider,
     });
+    if (typeof sessionStore.setLastReplyTarget === "function") {
+      sessionStore.setLastReplyTarget(bindingKey, {
+        userId: normalized.senderId,
+        contextToken: normalized.contextToken,
+        provider: normalized.provider,
+      });
+    }
 
-    const command = parseChannelCommand(normalized.text);
+    const command = parseChannelCommand(normalized.commandText || normalized.text);
     if (allowCommands && command) {
       await this.dispatchChannelCommand(normalized, command);
       return;
@@ -407,6 +464,16 @@ class CyberbossApp {
 
     if (this.hasPendingImageInbound(bindingKey, workspaceRoot)) {
       await this.flushPendingImageInboundBatch({ bindingKey, workspaceRoot });
+    }
+
+    if (typeof this.shouldSettleTextInbound === "function" && this.shouldSettleTextInbound(prepared)) {
+      this.enqueuePendingTextInbound({ bindingKey, workspaceRoot, prepared });
+      return;
+    }
+
+    if (typeof this.hasPendingTextInbound === "function"
+      && this.hasPendingTextInbound(bindingKey, workspaceRoot)) {
+      await this.flushPendingTextInbound({ bindingKey, workspaceRoot });
     }
 
     await this.routePreparedInbound({ bindingKey, workspaceRoot, prepared });
@@ -474,6 +541,12 @@ class CyberbossApp {
       } else {
         this.streamDelivery.queueReplyTargetForThread(turn.threadId, replyTarget);
       }
+      this.conversationRecorder?.recordInboundMessage?.({
+        prepared,
+        threadId: turn.threadId,
+        turnId: turn.turnId,
+        workspaceRoot,
+      });
       return true;
     } catch (error) {
       this.turnGateStore.releaseScope(bindingKey, workspaceRoot);
@@ -634,6 +707,67 @@ class CyberbossApp {
     }
 
     return true;
+  }
+
+  shouldSettleTextInbound(prepared) {
+    return Number(this.config.inboundTextSettleMs) > 0
+      && prepared?.provider !== "system"
+      && isPlainTextPreparedMessage(prepared);
+  }
+
+  hasPendingTextInbound(bindingKey, workspaceRoot) {
+    return this.pendingTextInboundByScope.has(buildScopeKey(bindingKey, workspaceRoot));
+  }
+
+  enqueuePendingTextInbound({ bindingKey, workspaceRoot, prepared }) {
+    const scopeKey = buildScopeKey(bindingKey, workspaceRoot);
+    if (!scopeKey || !prepared) return;
+    const current = this.pendingTextInboundByScope.get(scopeKey) || {
+      bindingKey,
+      workspaceRoot,
+      messages: [],
+      timer: null,
+    };
+    current.messages.push(clonePreparedInboundMessage(prepared));
+    if (current.timer) clearTimeout(current.timer);
+    current.timer = setTimeout(() => {
+      void this.flushPendingTextInbound({ bindingKey, workspaceRoot }).catch((error) => {
+        const message = error instanceof Error ? error.stack || error.message : String(error);
+        console.error(`[cyberboss] text inbound settle flush failed ${message}`);
+      });
+    }, Math.max(0, Number(this.config.inboundTextSettleMs) || 0));
+    this.pendingTextInboundByScope.set(scopeKey, current);
+    void this.channelAdapter.sendTyping({
+      userId: prepared.senderId,
+      status: 1,
+      contextToken: prepared.contextToken,
+    }).catch(() => {});
+  }
+
+  async flushPendingTextInbound({ bindingKey = "", workspaceRoot = "" } = {}) {
+    const scopeKey = buildScopeKey(bindingKey, workspaceRoot);
+    const draft = scopeKey ? this.pendingTextInboundByScope.get(scopeKey) : null;
+    if (!draft) return false;
+    if (draft.timer) clearTimeout(draft.timer);
+    this.pendingTextInboundByScope.delete(scopeKey);
+    const messages = draft.messages.slice().sort(comparePendingInboundMessages);
+    if (!messages.length) return false;
+    const prepared = buildMergedInboundPrepared({
+      bindingKey: draft.bindingKey,
+      workspaceRoot: draft.workspaceRoot,
+      messages,
+    });
+    return this.routePreparedInbound({
+      bindingKey: draft.bindingKey,
+      workspaceRoot: draft.workspaceRoot,
+      prepared,
+    });
+  }
+
+  clearPendingTextInboundTimers() {
+    for (const draft of this.pendingTextInboundByScope.values()) {
+      if (draft?.timer) clearTimeout(draft.timer);
+    }
   }
 
   bufferPendingInboundMessage({ bindingKey, workspaceRoot, prepared }) {
@@ -912,6 +1046,7 @@ class CyberbossApp {
           senderId: reminder.senderId,
           workspaceRoot: this.resolveReminderWorkspaceRoot(reminder),
           text: buildReminderSystemTrigger(reminder, this.config),
+          contextToken: reminder.contextToken,
           createdAt: new Date().toISOString(),
         });
       } catch {
@@ -933,20 +1068,57 @@ class CyberbossApp {
   }
 
   async dispatchSystemMessage(message) {
-    const prepared = this.systemMessageDispatcher?.buildPreparedMessage(message, this.channelAdapter.getKnownContextTokens()[message.senderId] || "");
+    const sessionStore = this.runtimeAdapter.getSessionStore();
+    const bindingKey = sessionStore.buildBindingKey({
+      workspaceId: this.config?.workspaceId || "",
+      accountId: message.accountId || this.activeAccountId,
+      senderId: message.senderId,
+    });
+    const targetResolver = typeof this.resolveSystemMessageDeliveryTarget === "function"
+      ? this.resolveSystemMessageDeliveryTarget
+      : CyberbossApp.prototype.resolveSystemMessageDeliveryTarget;
+    const deliveryTarget = targetResolver.call(this, { message, bindingKey, sessionStore });
+    const prepared = this.systemMessageDispatcher?.buildPreparedMessage(message, deliveryTarget);
     if (!prepared) {
       throw new Error("system message could not be prepared");
     }
-    const bindingKey = this.runtimeAdapter.getSessionStore().buildBindingKey({
-      workspaceId: prepared.workspaceId,
-      accountId: prepared.accountId,
-      senderId: prepared.senderId,
-    });
     const workspaceRoot = prepared.workspaceRoot || this.resolveWorkspaceRoot(bindingKey);
     if (this.isTurnDispatchBlocked(bindingKey, workspaceRoot)) {
       return false;
     }
     return this.dispatchPreparedTurn({ bindingKey, workspaceRoot, prepared });
+  }
+
+  resolveSystemMessageDeliveryTarget({ message, bindingKey, sessionStore }) {
+    const knownContextTokens = this.channelAdapter.getKnownContextTokens();
+    const weixinContextToken = normalizeCommandArgument(knownContextTokens?.[message.senderId]);
+    const fallback = {
+      userId: message.senderId,
+      contextToken: weixinContextToken,
+      provider: "weixin",
+    };
+    const explicitContextToken = normalizeCommandArgument(message?.contextToken);
+    const explicitProvider = inferChannelProviderFromContextToken(explicitContextToken);
+    const explicitTarget = {
+      userId: message.senderId,
+      contextToken: explicitContextToken,
+      provider: explicitProvider,
+    };
+    if (isUsableChannelReplyTarget(explicitTarget, message.senderId)) {
+      return explicitTarget;
+    }
+    if (message?.deliveryMode !== "last_active" || typeof sessionStore?.getLastReplyTarget !== "function") {
+      return fallback;
+    }
+
+    const lastTarget = sessionStore.getLastReplyTarget(bindingKey);
+    if (!isUsableChannelReplyTarget(lastTarget, message.senderId)) {
+      return fallback;
+    }
+    if (lastTarget.provider === "weixin" && weixinContextToken) {
+      return { ...lastTarget, contextToken: weixinContextToken };
+    }
+    return lastTarget;
   }
 
   async dispatchChannelCommand(normalized, command) {
@@ -1474,6 +1646,7 @@ class CyberbossApp {
     if (!event) {
       return;
     }
+    this.recordRuntimeConversationEvent?.(event);
     if (event.type === "runtime.turn.completed" || event.type === "runtime.turn.failed") {
       const completedRunKey = buildRunKey(event.payload.threadId, event.payload.turnId);
       const pendingOperations = this.pendingOperationByRunKey;
@@ -1577,6 +1750,24 @@ class CyberbossApp {
     this.threadStateStore.resolveApproval(event.payload.threadId, "running");
   }
 
+  recordRuntimeConversationEvent(event) {
+    const threadId = event?.payload?.threadId;
+    const linked = threadId
+      ? this.runtimeAdapter.getSessionStore().findBindingForThreadId(threadId)
+      : null;
+    const recorded = this.conversationRecorder.recordRuntimeEvent(event, {
+      workspaceRoot: linked?.workspaceRoot || "",
+    });
+    if (recorded?.type === "assistant" && recorded.text) {
+      this.projectServices.memoryArchive?.archiveMessage({
+        ...recorded,
+        type: "assistant",
+        direction: "outbound",
+        provider: this.runtimeAdapter.describe().id,
+      });
+    }
+  }
+
   async stopTypingForThread(threadId) {
     const linked = this.runtimeAdapter.getSessionStore().findBindingForThreadId(threadId);
     const target = linked?.bindingKey ? this.resolveReplyTargetForBinding(linked.bindingKey) : null;
@@ -1666,20 +1857,25 @@ class CyberbossApp {
   }
 
   resolveReplyTargetForBinding(bindingKey) {
-    const binding = this.runtimeAdapter.getSessionStore().getBinding(bindingKey) || null;
+    const sessionStore = this.runtimeAdapter.getSessionStore();
+    const binding = sessionStore.getBinding(bindingKey) || null;
     const userId = normalizeCommandArgument(binding?.senderId);
     if (!userId) {
       return null;
     }
-    const contextToken = this.channelAdapter.getKnownContextTokens()[userId] || "";
-    if (!contextToken) {
-      return null;
+    const weixinContextToken = this.channelAdapter.getKnownContextTokens()[userId] || "";
+    const lastTarget = typeof sessionStore.getLastReplyTarget === "function"
+      ? sessionStore.getLastReplyTarget(bindingKey)
+      : null;
+    if (isUsableChannelReplyTarget(lastTarget, userId)) {
+      if (lastTarget.provider === "weixin" && weixinContextToken) {
+        return { ...lastTarget, contextToken: weixinContextToken };
+      }
+      return lastTarget;
     }
-    return {
-      userId,
-      contextToken,
-      provider: "weixin",
-    };
+    return weixinContextToken
+      ? { userId, contextToken: weixinContextToken, provider: "weixin" }
+      : null;
   }
 }
 
@@ -1696,6 +1892,28 @@ function normalizeReplyTarget(target) {
     contextToken: String(target.contextToken).trim(),
     provider: normalizeText(target.provider),
   };
+}
+
+function isUsableChannelReplyTarget(target, senderId) {
+  if (!target || normalizeCommandArgument(target.userId) !== normalizeCommandArgument(senderId)) {
+    return false;
+  }
+  const provider = normalizeCommandArgument(target.provider).toLowerCase();
+  const contextToken = normalizeCommandArgument(target.contextToken);
+  if (provider === "telegram") {
+    return contextToken.startsWith("telegram:") && contextToken.length > "telegram:".length;
+  }
+  if (provider === "qqbot") {
+    return /^qqbot:(?:c2c|group):.+/.test(contextToken);
+  }
+  return provider === "weixin" && Boolean(contextToken);
+}
+
+function inferChannelProviderFromContextToken(contextToken) {
+  const normalized = normalizeCommandArgument(contextToken).toLowerCase();
+  if (normalized.startsWith("telegram:")) return "telegram";
+  if (normalized.startsWith("qqbot:")) return "qqbot";
+  return normalized ? "weixin" : "";
 }
 
 function formatCompactNumber(value) {
@@ -1990,7 +2208,7 @@ function matchesBuiltInCommandPrefix(commandTokens) {
     return true;
   }
 
-   if (normalized[0] === "mcp_tool" && normalized[1] === "cyberboss_tools") {
+   if (normalized[0] === "mcp_tool" && ["cyberboss_tools", "ombre_brain"].includes(normalized[1])) {
     return true;
   }
 

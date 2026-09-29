@@ -4,6 +4,7 @@ const { resolveSelectedAccount } = require("../adapters/channel/weixin/account-s
 const { loadPersistedContextTokens } = require("../adapters/channel/weixin/context-token-store");
 const { ReminderQueueStore } = require("../adapters/channel/weixin/reminder-queue-store");
 const { resolvePreferredSenderId } = require("../core/default-targets");
+const { resolveCurrentChatContextToken } = require("./channel-file-service");
 const { resolveBodyInput } = require("./text-input");
 
 const DELAY_UNIT_MS = {
@@ -49,11 +50,16 @@ class ReminderService {
       sessionStore: this.sessionStore,
     });
     if (!senderId) {
-      throw new Error("Cannot determine the WeChat user for this reminder.");
+      throw new Error("Cannot determine the current-chat user for this reminder.");
     }
 
     const contextTokens = loadPersistedContextTokens(this.config, account.accountId);
-    const contextToken = String(contextTokens[senderId] || "").trim();
+    const contextToken = resolveCurrentChatContextToken({
+      sessionStore: this.sessionStore,
+      context,
+      userId: senderId,
+      fallbackContextToken: contextTokens[senderId],
+    });
     if (!contextToken) {
       throw new Error(`Cannot find context_token for ${senderId}. Let this user talk to the bot once first.`);
     }
