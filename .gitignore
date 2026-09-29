@@ -1,9 +1,38 @@
 node_modules/
 .DS_Store
 .env
+.env.telegram
+.env.qqbot
+.env.elevenlabs
 .mcp.json
 .claude/settings.json
 .claude/settings.local.json
 npm-debug.log*
 third_party/
 firmware/
+
+# Local runtimes, integrations, and sibling repositories
+/.tools/
+/dashboard/
+/external/
+/publish-mbti/
+/tools/
+
+# Local work products and personal data
+/deliverables/
+/reading-import/
+/research/
+/IO控制/
+/weixin-operations.txt
+/work.md
+
+# Generated output, caches, downloads, and backups
+/.tmp*/
+/.venv*/
+/backups/
+/downloads/
+/output/
+/outputs/
+/tmp/
+*.bak-*
+*.before-*
